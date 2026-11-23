@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#5c2d91">
+  <title>Sideline Practice Timer</title>
+  
+  <!-- Firebase SDKs (v8 Compat) -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+
+  <style>
+    :root {
+      --bg: #121212;          /* AMOLED Black */
+      --surface: #1e1e1e;     /* Dark Gray for cards */
+      --primary: #5c2d91;     /* Athletic Purple */
+      --text: #ffffff;        /* Crisp White */
+      --danger: #cf6679;      /* Dark Mode Red for buzzer */
+    }
+    * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
+    body { 
+      background-color: var(--bg); color: var(--text); margin: 0; padding: 0;
+      display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+    }
+    header { 
+      background-color: var(--primary); color: var(--text); 
+      padding: 1rem; text-align: center; font-weight: bold; font-size: 1.2rem;
+      border-bottom: 2px solid #ffffff;
+    }
+    .container { flex: 1; display: flex; flex-direction: column; padding: 1rem; overflow-y: auto; }
+    
+    #setup-view, #builder-view { display: flex; flex-direction: column; height: 100%; gap: 1rem; }
+    #builder-view { display: none; } /* Hidden by default */
+    
+    select, input[type="text"], input[type="number"], textarea { 
+      background: var(--surface); color: var(--text); 
+      border: 1px solid var(--primary); border-radius: 8px; padding: 1rem; font-size: 1rem; width: 100%;
+    }
+    textarea { font-family: monospace; resize: none; font-size: 14px; height: 120px; }
+    
+    .btn { 
+      background-color: var(--primary); color: var(--text); 
+      border: 1px solid #ffffff; padding: 1rem; font-size: 1.1rem; font-weight: bold; 
+      border-radius: 8px; cursor: pointer; text-align: center; 
+    }
+    .btn:active { transform: scale(0.98); }
+    .btn-secondary { background-color: var(--surface); border: 1px solid #777; }
+    .btn-danger { background-color: var(--danger); border-color: #ffb4a2; }
+    
+    #timer-view { display: none; flex-direction: column; height: 100%; }
+    #clock { 
+      font-size: 6rem; font-weight: 900; text-align: center; 
+      font-variant-numeric: tabular-nums; margin: 1rem 0; color: var(--text); 
+    }
+    #drill-title { font-size: 2rem; color: var(--primary); text-align: center; margin: 0.5rem 0; font-weight: 800; text-shadow: 1px 1px 2px #000; }
+    .notes-card { 
+      background: var(--surface); padding: 1rem; border-radius: 8px; 
+      flex: 1; overflow-y: auto; margin-bottom: 1rem; border: 1px solid #333;
+    }
+    ul { padding-left: 1.5rem; } li { margin-bottom: 0.5rem; font-size: 1.1rem; }
+    
+    .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 0.5rem; }
+    .flash-red { animation: flash 1s infinite alternate; }
+    @keyframes flash { from { background-color: var(--bg); } to { background-color: #4a0000; } }
+    
+    #assistant-badge { 
+      display: none; background: #ffffff; color: var(--primary); 
+      padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.8rem; 
+      vertical-align: middle; margin-left: 0.5rem; font-weight: 900;
+    }
+
+    /* Builder Specifics */
+    .builder-card { background: var(--surface); border: 1px solid #333; border-radius: 8px; padding: 1rem; margin-bottom: 0.5rem; }
+    .builder-input-group { margin-bottom: 0.75rem; }
+    .builder-input-group label { display: block; font-size: 0.9rem; color: var(--primary); font-weight: bold; margin-bottom: 0.25rem; }
+  </style>
+</head>
+<body>
+
+  <header id="app-header">Sideline Timer <span id="assistant-badge">ASSISTANT</span></header>
+
+  <div class="container">
+    
+    <!-- Setup View -->
+    <div id="setup-view">
+      <input type="text" id="team-id" placeholder="Team ID (e.g. yball-tigers)" />
+      <button class="btn btn-secondary" onclick="startListening()">🎧 Listen (Assistant Mode)</button>
+      
+      <hr style="width: 100%; border-color: #333; margin: 0.5rem 0;">
+
+      <label style="font-weight: bold; color: var(--primary);">Load Saved Practice:</label>
+      <select id="saved-practices" onchange="loadFromFirebase()">
+        <option value="">-- Select a Practice --</option>
+      </select>
+      
+      <hr style="width: 100%; border-color: #333; margin: 0.5rem 0;">
+      
+      <button class="btn" style="background-color: #ffffff; color: var(--primary); border-color: var(--primary);" onclick="openBuilder()">🛠️ Build Custom Practice UI</button>
+
+      <p style="margin: 0; font-weight: bold; color: var(--primary); margin-top: 1rem;">Or Paste JSON:</p>
+      <textarea id="json-input" placeholder='Paste JSON here to save...'></textarea>
+      <button class="btn btn-secondary" onclick="saveJsonToFirebase()">Save JSON</button>
+    </div>
+
+    <!-- Builder View -->
+    <div id="builder-view">
+      <h2 style="margin:0; color: var(--primary);">Practice Builder</h2>
+      <input type="text" id="b-title" placeholder="Practice Title (e.g. Defense & Weave)" />
+      
+      <div id="builder-drills-list"></div>
+      <div id="builder-total" style="font-weight: bold; text-align: center;">Total Time: 0 mins</div>
+
+      <div class="builder-card">
+        <h3 style="margin-top:0; color:var(--primary);">Add New Drill</h3>
+        <div class="builder-input-group">
+          <input type="text" id="b-drill-name" placeholder="Drill Name" />
+        </div>
+        <div class="builder-input-group">
+          <input type="number" id="b-drill-time" placeholder="Duration (Minutes)" />
+        </div>
+        <div class="builder-input-group">
+          <input type="text" id="b-drill-desc" placeholder="Brief Description" />
+        </div>
+        <div class="builder-input-group">
+          <label>Coaching Notes (Comma separated)</label>
+          <input type="text" id="b-drill-notes" placeholder="Stay low, Box out, Hustle" />
+        </div>
+        <div class="builder-input-group">
+          <input type="text" id="b-drill-url" placeholder="YouTube URL (Optional)" />
+        </div>
+        <button class="btn btn-secondary" style="width: 100%;" onclick="addDrillToBuilder()">+ Add Drill to Plan</button>
+      </div>
+
+      <div class="controls">
+        <button class="btn btn-secondary" onclick="closeBuilder()">Cancel</button>
+        <button class="btn" onclick="saveBuiltPractice()">Save Practice</button>
+      </div>
+    </div>
+
+    <!-- Timer View -->
+    <div id="timer-view">
+      <div id="clock">00:00</div>
+      
+      <div id="hc-controls-1" class="controls" style="grid-template-columns: 1fr;">
+        <button id="play-pause-btn" class="btn" onclick="toggleTimer()">Start Drill</button>
+      </div>
+
+      <div id="drill-title">Drill Name</div>
+      <div id="drill-video" style="text-align: center; margin-bottom: 0.5rem;"></div>
+      
+      <div class="notes-card">
+        <h3 id="drill-desc" style="margin-top: 0; color: var(--primary);">Description</h3>
+        <ul id="drill-notes"></ul>
+      </div>
+
+      <div id="hc-controls-2" class="controls">
+        <button class="btn btn-secondary" onclick="prevDrill()">&#9664; Prev</button>
+        <button class="btn btn-secondary" onclick="nextDrill()">Next &#9654;</button>
+      </div>
+      <button class="btn btn-secondary" style="width: 100%; padding: 0.75rem;" onclick="resetApp()">Exit Plan</button>
+    </div>
+  </div>
+
+  <script>
+    // 1. INSERT YOUR FIREBASE CONFIG HERE
+    const firebaseConfig = {
+        apiKey: "AIzaSyDWwjQv-HNtC7TOpQzZUmngaE-0likR6bQ",
+        authDomain: "concessions-pos-d8e7f.firebaseapp.com",
+        projectId: "concessions-pos-d8e7f",
+        storageBucket: "concessions-pos-d8e7f.firebasestorage.app",
+        messagingSenderId: "762523049509",
+        appId: "1:762523049509:web:be9840b4641276599169cc"
+    };
+    
+    if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
+    const db = firebase.firestore();
+
+    // App State
+    let plan = null;
+    let currentDrillIndex = 0;
+    let timeRemaining = 0;
+    let targetEndTime = 0;
+    let timerInterval = null;
+    let isRunning = false;
+    let audioCtx = null;
+    let teamId = '';
+    let isAssistant = false;
+    let unsubscribeSync = null;
+
+    // Builder State
+    let customDrills = [];
+
+    window.onload = async () => {
+      refreshPracticeDropdown();
+    };
+
+    async function refreshPracticeDropdown() {
+      const select = document.getElementById('saved-practices');
+      select.innerHTML = '<option value="">-- Select a Practice --</option>';
+      const snapshot = await db.collection('practice_plans').get();
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        const option = document.createElement('option');
+        option.value = doc.id;
+        option.text = data.title;
+        select.appendChild(option);
+      });
+    }
+
+    // --- Builder Logic ---
+    function openBuilder() {
+      document.getElementById('setup-view').style.display = 'none';
+      document.getElementById('builder-view').style.display = 'flex';
+      customDrills = [];
+      document.getElementById('b-title').value = '';
+      renderBuilderDrills();
+    }
+
+    function closeBuilder() {
+      document.getElementById('builder-view').style.display = 'none';
+      document.getElementById('setup-view').style.display = 'flex';
+    }
+
+    function addDrillToBuilder() {
+      const name = document.getElementById('b-drill-name').value.trim();
+      const time = parseInt(document.getElementById('b-drill-time').value);
+      const desc = document.getElementById('b-drill-desc').value.trim();
+      const notesRaw = document.getElementById('b-drill-notes').value.trim();
+      const url = document.getElementById('b-drill-url').value.trim();
+
+      if (!name || isNaN(time) || time <= 0) return alert("Drill name and valid duration required.");
+
+      const notesArr = notesRaw ? notesRaw.split(',').map(n => n.trim()) : [];
+
+      customDrills.push({
+        name: name,
+        durationMinutes: time,
+        description: desc,
+        coachingNotes: notesArr,
+        videoUrl: url
+      });
+
+      document.getElementById('b-drill-name').value = '';
+      document.getElementById('b-drill-time').value = '';
+      document.getElementById('b-drill-desc').value = '';
+      document.getElementById('b-drill-notes').value = '';
+      document.getElementById('b-drill-url').value = '';
+
+      renderBuilderDrills();
+    }
+
+    function removeDrill(index) {
+      customDrills.splice(index, 1);
+      renderBuilderDrills();
+    }
+
+    function renderBuilderDrills() {
+      const list = document.getElementById('builder-drills-list');
+      list.innerHTML = '';
+      let totalTime = 0;
+
+      customDrills.forEach((drill, index) => {
+        totalTime += drill.durationMinutes;
+        const div = document.createElement('div');
+        div.className = 'builder-card';
+        div.innerHTML = `
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <strong>${drill.name} (${drill.durationMinutes}m)</strong>
+            <button onclick="removeDrill(${index})" style="background:var(--danger);color:#fff;border:none;border-radius:4px;padding:4px 8px;">X</button>
+          </div>
+        `;
+        list.appendChild(div);
+      });
+      document.getElementById('builder-total').innerText = `Total Time: ${totalTime} mins`;
+    }
+
+    async function saveBuiltPractice() {
+      const title = document.getElementById('b-title').value.trim();
+      if (!title || customDrills.length === 0) return alert("Title and at least one drill required.");
+
+      const totalTime = customDrills.reduce((sum, drill) => sum + drill.durationMinutes, 0);
+      const newPlan = { title: title, totalMinutes: totalTime, drills: customDrills };
+
+      try {
+        await db.collection('practice_plans').add(newPlan);
+        await refreshPracticeDropdown();
+        closeBuilder();
+        alert("Practice saved to Firebase Library!");
+      } catch (e) { alert("Error saving to Firebase."); }
+    }
+
+    // --- Firebase DB / Timer Logic ---
+    async function saveJsonToFirebase() {
+      const input = document.getElementById('json-input').value;
+      try {
+        const parsed = JSON.parse(input);
+        await db.collection('practice_plans').add(parsed);
+        await refreshPracticeDropdown();
+        document.getElementById('json-input').value = '';
+        alert("JSON saved to Library!");
+      } catch (e) { alert("Invalid JSON format."); }
+    }
+
+    async function loadFromFirebase() {
+      const select = document.getElementById('saved-practices');
+      if (!select.value) return;
+      initAudio();
+      teamId = document.getElementById('team-id').value.trim();
+      if (!teamId) return alert("Enter a Team ID before starting.");
+
+      const doc = await db.collection('practice_plans').doc(select.value).get();
+      if (doc.exists) {
+        startPractice(doc.data());
+      }
+    }
+
+    // ... [The rest of the Audio, startPractice, broadcastState, startListening, render, and tick logic remains exactly the same] ...
+
+    function initAudio() {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    }
+    function playBuzzer() {
+      if (!audioCtx) return;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(400, audioCtx.currentTime); 
+      osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 1);
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(); gain.gain.setValueAtTime(1, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 1);
+      osc.stop(audioCtx.currentTime + 1.2);
+    }
+
+    function startPractice(loadedPlan) {
+      plan = loadedPlan;
+      currentDrillIndex = 0;
+      timeRemaining = plan.drills[0].durationMinutes * 60;
+      isAssistant = false;
+      showTimerView();
+      renderDrill();
+      broadcastState();
+    }
+
+    function broadcastState() {
+      if (isAssistant || !teamId) return;
+      db.collection('live_sessions').doc(teamId).set({
+        plan: plan,
+        idx: currentDrillIndex,
+        run: isRunning,
+        rem: timeRemaining,
+        end: isRunning ? Date.now() + (timeRemaining * 1000) : 0,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    }
+
+    function startListening() {
+      teamId = document.getElementById('team-id').value.trim();
+      if (!teamId) return alert("Please enter a Team ID to listen.");
+      initAudio();
+      isAssistant = true;
+      document.getElementById('assistant-badge').style.display = 'inline-block';
+      
+      document.getElementById('hc-controls-1').style.display = 'none';
+      document.getElementById('hc-controls-2').style.display = 'none';
+
+      unsubscribeSync = db.collection('live_sessions').doc(teamId)
+        .onSnapshot((doc) => {
+          if (doc.exists) {
+            const state = doc.data();
+            if (state.plan) plan = state.plan;
+            currentDrillIndex = state.idx;
+            isRunning = state.run;
+            
+            if (isRunning) {
+              targetEndTime = state.end;
+              if (!timerInterval) timerInterval = setInterval(tick, 1000);
+            } else {
+              timeRemaining = state.rem;
+              clearInterval(timerInterval);
+              timerInterval = null;
+              document.body.classList.remove('flash-red');
+            }
+            showTimerView();
+            renderDrill();
+          }
+        });
+      alert("Listening... Waiting for Head Coach.");
+    }
+
+    function showTimerView() {
+      document.getElementById('setup-view').style.display = 'none';
+      document.getElementById('builder-view').style.display = 'none';
+      document.getElementById('timer-view').style.display = 'flex';
+      document.getElementById('app-header').childNodes[0].nodeValue = (plan && plan.title) ? plan.title + " " : "Practice Plan ";
+    }
+
+    function renderDrill() {
+      if (!plan) return;
+      const drill = plan.drills[currentDrillIndex];
+      document.getElementById('drill-title').innerText = drill.name;
+      document.getElementById('drill-desc').innerText = drill.description;
+      
+      const videoDiv = document.getElementById('drill-video');
+      videoDiv.innerHTML = drill.videoUrl 
+        ? `<a href="${drill.videoUrl}" target="_blank" style="color: var(--primary); text-decoration: underline; font-weight: bold;">🎥 Watch Video</a>` 
+        : '';
+      
+      const notesUl = document.getElementById('drill-notes');
+      notesUl.innerHTML = '';
+      if (drill.coachingNotes) drill.coachingNotes.forEach(note => {
+        const li = document.createElement('li'); li.innerText = note; notesUl.appendChild(li);
+      });
+      
+      updateClockDisplay();
+      if (!isRunning) document.body.classList.remove('flash-red');
+    }
+
+    function updateClockDisplay() {
+      if (isAssistant && isRunning) {
+        timeRemaining = Math.max(0, Math.round((targetEndTime - Date.now()) / 1000));
+      }
+      const m = Math.floor(timeRemaining / 60).toString().padStart(2, '0');
+      const s = (timeRemaining % 60).toString().padStart(2, '0');
+      document.getElementById('clock').innerText = `${m}:${s}`;
+    }
+
+    function toggleTimer() {
+      initAudio();
+      const btn = document.getElementById('play-pause-btn');
+      if (isRunning) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+        btn.innerText = "Resume Drill";
+        btn.classList.remove('btn-danger');
+      } else {
+        if (timeRemaining <= 0) return;
+        timerInterval = setInterval(tick, 1000);
+        btn.innerText = "Pause";
+        btn.classList.add('btn-danger');
+        document.body.classList.remove('flash-red');
+      }
+      isRunning = !isRunning;
+      broadcastState();
+    }
+
+    function tick() {
+      if (!isAssistant) timeRemaining--;
+      updateClockDisplay();
+      
+      if (timeRemaining <= 0) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+        isRunning = false;
+        playBuzzer();
+        document.body.classList.add('flash-red');
+        if (!isAssistant) {
+          const btn = document.getElementById('play-pause-btn');
+          btn.innerText = "Drill Complete";
+          btn.classList.remove('btn-danger');
+          broadcastState();
+        }
+      }
+    }
+
+    function nextDrill() {
+      if (currentDrillIndex < plan.drills.length - 1) {
+        currentDrillIndex++; resetCurrentDrill();
+      }
+    }
+
+    function prevDrill() {
+      if (currentDrillIndex > 0) {
+        currentDrillIndex--; resetCurrentDrill();
+      }
+    }
+
+    function resetCurrentDrill() {
+      clearInterval(timerInterval);
+      timerInterval = null;
+      isRunning = false;
+      document.getElementById('play-pause-btn').innerText = "Start Drill";
+      document.getElementById('play-pause-btn').classList.remove('btn-danger');
+      timeRemaining = plan.drills[currentDrillIndex].durationMinutes * 60;
+      renderDrill();
+      broadcastState();
+    }
+
+    function resetApp() {
+      if (confirm("Exit current practice plan?")) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+        if (unsubscribeSync) { unsubscribeSync(); unsubscribeSync = null; }
+        document.getElementById('timer-view').style.display = 'none';
+        document.getElementById('builder-view').style.display = 'none';
+        document.getElementById('setup-view').style.display = 'flex';
+        document.getElementById('app-header').childNodes[0].nodeValue = "Sideline Timer ";
+        document.getElementById('assistant-badge').style.display = 'none';
+      }
+    }
+  </script>
+</body>
+</html>
