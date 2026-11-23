@@ -154,7 +154,7 @@
     <div id="timer-view">
       <div id="clock">00:00</div>
       
-      <div id="hc-controls-1" style="margin-bottom: 0.5rem;">
+      <div id="hc-controls-1" class="controls" style="grid-template-columns: 1fr; margin-bottom: 0.5rem;">
         <button id="play-pause-btn" class="btn" onclick="toggleTimer()">Start Drill</button>
       </div>
 
@@ -218,7 +218,10 @@
           const data = doc.data();
           const option = document.createElement('option');
           option.value = doc.id;
-          option.text = data.title;
+          
+          // Fallback label for broken JSON saves missing a title
+          option.text = data.title ? data.title : "⚠️ Broken/Untitled Save"; 
+          
           select.appendChild(option);
         });
       } catch (e) {
@@ -356,6 +359,11 @@
       currentDrillIndex = 0;
       timeRemaining = plan.drills[0].durationMinutes * 60;
       isAssistant = false;
+      
+      // Fix: Ensure Head Coach buttons are un-hidden if returning from Assistant Mode
+      document.getElementById('hc-controls-1').style.display = '';
+      document.getElementById('hc-controls-2').style.display = '';
+
       showTimerView();
       renderDrill();
       broadcastState();
