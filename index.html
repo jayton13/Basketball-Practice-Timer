@@ -184,12 +184,12 @@
 
     // 1. INSERT YOUR FIREBASE CONFIG HERE
     const firebaseConfig = {
-      apiKey: "YOUR_API_KEY",
-      authDomain: "YOUR_PROJECT.firebaseapp.com",
-      projectId: "YOUR_PROJECT_ID",
-      storageBucket: "YOUR_PROJECT.appspot.com",
-      messagingSenderId: "YOUR_MESSAGING_ID",
-      appId: "YOUR_APP_ID"
+        apiKey: "AIzaSyDWwjQv-HNtC7TOpQzZUmngaE-0likR6bQ",
+        authDomain: "concessions-pos-d8e7f.firebaseapp.com",
+        projectId: "concessions-pos-d8e7f",
+        storageBucket: "concessions-pos-d8e7f.firebasestorage.app",
+        messagingSenderId: "762523049509",
+        appId: "1:762523049509:web:be9840b4641276599169cc"
     };
     
     if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
@@ -315,7 +315,11 @@
         await db.collection('practice_plans').add(parsed);
         await refreshPracticeDropdown();
         document.getElementById('json-input').value = '';
-      } catch (e) { alert("Invalid JSON format."); }
+        alert("Success! Practice saved to your Library."); 
+      } catch (e) { 
+        console.error(e);
+        alert("Error saving: Check if the JSON is valid and your Firebase keys are pasted in correctly."); 
+      }
     }
     
     async function loadFromFirebase() {
